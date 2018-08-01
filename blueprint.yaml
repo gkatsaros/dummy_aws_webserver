@@ -170,8 +170,8 @@ node_templates:
     properties:
       resource_config:
         kwargs:
-          GroupName: Docker-Platform-SecurityGroup
-          Description: Created by aws-docker-platform-deploy blueprint
+          GroupName: AwsTest-SecurityGroup
+          Description: Created by dummy-aws-webserver blueprint
           VpcId: { get_attribute: [ vpc, aws_resource_id] }
       client_config: *client_config
     relationships:
