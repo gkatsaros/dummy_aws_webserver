@@ -1,0 +1,243 @@
+tosca_definitions_version: cloudify_dsl_1_3
+
+description: >
+  This blueprint deploys a simple Nginx webserver on a CentOS Linux Node in AWS
+
+imports:
+  - http://www.getcloudify.org/spec/cloudify/4.3/types.yaml
+  - plugin:cloudify-awssdk-plugin
+  - plugin:cloudify-utilities-plugin
+
+inputs:
+
+  ami:
+    description: >
+      An AWS AMI. Tested with a Centos 7.0 image.
+    default: { get_attribute: [ centos_core_ami, aws_resource_id ] }
+
+  instance_type:
+    description: >
+      The AWS instance_type. Tested with m3.medium, although that is unnecessarily large.
+    default: t2.medium
+
+  agent_user:
+    description: >
+      The username of the agent running on the instance created from the image.
+    default: centos
+
+  agent_key_private:
+    description: >
+      The content of the agent's private key.
+    default: { get_secret: agent_key_private }
+
+  agent_key_public:
+    description: >
+      The content of the agent's public key.
+    default: { get_secret: agent_key_public }
+
+  aws_vpc_id:
+    description: >
+      The VPC ID from EC2
+    default: "vpc-d21bc6ba"
+  
+  aws_private_subnet_id:
+   description: >
+     The VPC Private Subnet ID from EC2
+   default: "subnet-2afb4743"
+  
+  aws_security_group:
+    description: >
+      The security group for youru instnace
+    default: "sg-cf7bb3a4" 
+  
+  aws_keypair_name:
+    description: >
+      Name of keypair
+    default: "devoteam"
+
+dsl_definitions:
+
+  aws_config: &aws_config
+    aws_access_key_id: { get_secret: aws_access_key_id }
+    aws_secret_access_key: { get_secret: aws_secret_access_key }
+    ec2_region_name: { get_secret: ec2_region_name }
+    ec2_region_endpoint: { get_secret: ec2_region_endpoint }
+
+  client_config: &client_config
+    aws_access_key_id: { get_secret: aws_access_key_id }
+    aws_secret_access_key: { get_secret: aws_secret_access_key }
+    region_name: { get_secret: ec2_region_name }
+
+node_templates:
+
+  host:
+    type: cloudify.nodes.aws.ec2.Instances
+    properties:
+      agent_config:
+        install_method: init_script 
+        user: { get_input: agent_user }
+        key: { get_secret: agent_key_private }
+      resource_config:
+        MaxCount: 1
+        MinCount: 1
+        ImageId: { get_input: ami }
+        InstanceType: { get_input: instance_type }
+        kwargs:
+          KeyName: { get_input: aws_keypair_name } 
+          BlockDeviceMappings:
+          - DeviceName: '/dev/sda1'
+            Ebs:
+              DeleteOnTermination: True
+          Placement:
+            AvailabilityZone: { get_secret: availability_zone }
+          UserData: { get_attribute: [ cloudify_host_cloud_config, cloud_config ] }
+      client_config: *client_config
+    relationships:
+      - type: cloudify.relationships.depends_on
+        target: ip
+      - type: cloudify.relationships.depends_on
+        target: nic
+      - type: cloudify.relationships.depends_on
+        target: cloudify_host_cloud_config
+      - type: cloudify.relationships.depends_on
+        target: centos_core_ami
+
+  centos_core_ami:
+    type: cloudify.nodes.aws.ec2.Image
+    properties:
+      resource_config:
+        kwargs:
+          Filters:
+          - Name: name
+            Values:
+            - 'CentOS 7.3.1611 x86_64 with cloud-init (HVM)'
+          - Name: owner-id
+            Values:
+            - '057448758665'
+      client_config: *client_config
+    relationships:
+ 
+  ip:
+    type: cloudify.nodes.aws.ec2.ElasticIP
+    properties:
+      resource_config:
+        kwargs:
+          Domain: 'vpc'
+      client_config: *client_config
+    relationships:
+    - type: cloudify.relationships.depends_on
+      target: nic
+ 
+  nic:
+    type: cloudify.nodes.aws.ec2.Interface
+    properties:
+      client_config: *client_config
+      resource_config:
+        kwargs:
+          Description: Created by the docker-platform-deploy blueprint.
+          SubnetId: { get_attribute: [ private_subnet, aws_resource_id] }
+          Groups:
+          - { get_attribute: [ security_group, aws_resource_id ] }
+    relationships:
+    - type: cloudify.relationships.depends_on
+      target: private_subnet
+    - type: cloudify.relationships.depends_on
+      target: security_group
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        configure:
+          inputs:
+            resource_config: { get_property: [ SELF, resource_config, kwargs] }
+
+  security_group_rules:
+    type: cloudify.nodes.aws.ec2.SecurityGroupRuleIngress
+    properties:
+      client_config: *client_config
+      resource_config:
+        kwargs:
+          IpPermissions:
+          - IpProtocol: tcp
+            FromPort: 22
+            ToPort: 22
+            IpRanges:
+            - CidrIp: 0.0.0.0/0
+    relationships:
+    - type: cloudify.relationships.contained_in
+      target: security_group
+
+  security_group:
+    type: cloudify.nodes.aws.ec2.SecurityGroup
+    properties:
+      resource_config:
+        kwargs:
+          GroupName: Docker-Platform-SecurityGroup
+          Description: Created by aws-docker-platform-deploy blueprint
+          VpcId: { get_attribute: [ vpc, aws_resource_id] }
+      client_config: *client_config
+    relationships:
+    - type: cloudify.relationships.depends_on
+      target: vpc
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        configure:
+          inputs:
+            resource_config: { get_property: [ SELF, resource_config, kwargs] }
+
+  private_subnet:
+    type: cloudify.nodes.aws.ec2.Subnet
+    properties:
+      client_config: *client_config
+      use_external_resource: true
+      resource_config:
+        kwargs:
+          CidrBlock: 'N/A'
+          AvailabilityZone: 'N/A'
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        create:
+          inputs:
+            aws_resource_id: { get_input: aws_private_subnet_id }
+    relationships:
+    - type: cloudify.relationships.depends_on
+      target: vpc
+
+  vpc:
+    type: cloudify.nodes.aws.ec2.Vpc
+    properties:
+      client_config: *client_config
+      use_external_resource: true
+      resource_config:
+        kwargs:
+          CidrBlock: 'N/A'
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        create:
+          inputs:
+            aws_resource_id: { get_input: aws_vpc_id } 
+    relationships:
+
+
+  cloudify_host_cloud_config:
+    type: cloudify.nodes.CloudInit.CloudConfig
+    properties:
+      resource_config:
+        users:
+          - name: { get_input: agent_user }
+            primary-group: wheel
+            shell: /bin/bash
+            sudo: ['ALL=(ALL) NOPASSWD:ALL']
+            ssh-authorized-keys:
+              - { get_input: agent_key_public }
+        packages:
+          - [vim]
+          - [wget]
+          - [git]
+          - [nginx]
+#        runcmd:
+#          - 'setenforce 0'
+
+outputs:
+
+  ip:
+    description: Public IP Address
+    value: { get_attribute: [ ip, aws_resource_id ] }
