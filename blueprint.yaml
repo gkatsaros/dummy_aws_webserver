@@ -53,7 +53,9 @@ inputs:
   aws_keypair_name:
     description: >
       Name of keypair
-    default: "devoteam"
+    default: "greg"
+
+
 
 dsl_definitions:
 
@@ -157,13 +159,39 @@ node_templates:
         kwargs:
           IpPermissions:
           - IpProtocol: tcp
+            FromPort: 443 
+            ToPort: 443 
+            IpRanges:
+            - CidrIp: 0.0.0.0/0
+          - IpProtocol: udp
+            FromPort: 2114 
+            ToPort: 2114 
+            IpRanges:
+            - CidrIp: 172.31.129.0/24
+          - IpProtocol: udp
+            FromPort: 1194
+            ToPort: 1194
+            IpRanges:
+            - CidrIp: 172.31.129.0/24
+          - IpProtocol: tcp
+            FromPort: 80
+            ToPort: 80
+            IpRanges:
+            - CidrIp: 0.0.0.0/0
+          - IpProtocol: tcp
             FromPort: 22
-            ToPort: 22
+            ToPort: 22 
+            IpRanges:
+            - CidrIp: 0.0.0.0/0
+          - IpProtocol: tcp
+            FromPort: 8787 
+            ToPort: 8787 
             IpRanges:
             - CidrIp: 0.0.0.0/0
     relationships:
     - type: cloudify.relationships.contained_in
       target: security_group
+
 
   security_group:
     type: cloudify.nodes.aws.ec2.SecurityGroup
@@ -233,11 +261,20 @@ node_templates:
           - [wget]
           - [git]
           - [nginx]
-#        runcmd:
-#          - 'setenforce 0'
+        runcmd:
+          - 'yum install nginx -y'
+          - 'touch /usr/share/nginx/html/alive.html'
+          - 'echo "alive" > /usr/share/nginx/html/alive.html'
+          - 'systemctl enable nginx'
+          - 'systemctl start nginx'
+
+
 
 outputs:
 
   ip:
     description: Public IP Address
     value: { get_attribute: [ ip, aws_resource_id ] }
+  fqdn:
+    description: AWS FQDN
+    value: { get_attribute: [ host, create_response, Instances, 0, PublicDnsName] }
