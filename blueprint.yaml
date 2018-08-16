@@ -198,7 +198,7 @@ node_templates:
     properties:
       resource_config:
         kwargs:
-          GroupName: AwsTest-SecurityGroup
+          GroupName: AwsTest-SecurGroup
           Description: Created by dummy-aws-webserver blueprint
           VpcId: { get_attribute: [ vpc, aws_resource_id] }
       client_config: *client_config
@@ -266,8 +266,17 @@ node_templates:
           - 'touch /usr/share/nginx/html/alive.html'
           - 'echo "alive" > /usr/share/nginx/html/alive.html'
           - 'systemctl enable nginx'
-          - 'systemctl start nginx'
+          #- 'systemctl start nginx'
 
+  application-instance:
+    type: cloudify.nodes.ApplicationModule
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        start: scripts/start.sh
+        stop: scripts/stop.sh
+    relationships:
+      - type: cloudify.relationships.contained_in
+        target: host
 
 
 outputs:
